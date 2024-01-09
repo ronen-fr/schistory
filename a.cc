@@ -69,6 +69,9 @@ struct EvToIdle_sh: sc::event< EvToIdle_sh > {};
 struct EvToIdle_dp: sc::event< EvToIdle_dp > {};
 struct EvToIdle: sc::event< EvToIdle > {};
 
+struct EvToX: sc::event< EvToX > {};
+
+
 struct A;
 struct HistoryTest : sc::state_machine< HistoryTest, A >
 {
@@ -92,6 +95,7 @@ struct Q;
 struct X;
 struct ActPre;
 struct ActPost;
+struct Idle;
 
 struct A : sc::simple_state< A, HistoryTest, X >
 {
@@ -122,9 +126,16 @@ struct A : sc::simple_state< A, HistoryTest, X >
   S() {std::cout << #S << "\n";} \
   ~S() {std::cout << "~" << #S << "\n";}
 
-struct X : sc::simple_state< X, A > {BODY(X)};
+struct X : sc::simple_state< X, A > {
+        BODY(X)
+        typedef mpl::list<
+        sc::transition< EvToIUn, IUn >
+        , sc::transition< EvToIMid, IMid >
+        , sc::transition< EvToIReg, IReg >
+        , sc::transition< EvToIdle, Idle >
+        > reactions;
+};
 struct Y : sc::simple_state< Y, A > {BODY(Y)};
-struct Idle;
 struct RActive : sc::simple_state< RActive, A, mpl::list<sc::shallow_history<Idle>>, sc::has_shallow_history> 
 {
         BODY(RActive);
@@ -135,6 +146,7 @@ struct Idle : sc::simple_state< Idle, RActive, IUn, sc::has_shallow_history> {
         sc::transition< EvToIUn, IUn >,
         sc::transition< EvToIMid, IMid >,
         sc::transition< EvToIReg, IReg >
+        , sc::transition< EvToX, X >
         , sc::custom_reaction< EvToOP >
         > reactions;
   sc::result react( const EvToOP & ) { return transit< OP >(); }
@@ -266,6 +278,49 @@ void basic_this_works(boost::shared_ptr< HistoryTest > pM)
   std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
   std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
   std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
+  assert(pM->state_downcast< const IReg * >());
+}
+
+
+void forget1(boost::shared_ptr< HistoryTest > pM)
+{
+  std::cout << "\n\n=================  " << __func__ << "\n";
+  pM->initiate();
+  std::cout << "--- -----------------   " << __func__ << "\n";
+  pM->process_event( EvToIUn() );
+  assert(pM->state_downcast< const IUn * >());
+  pM->process_event( EvToIReg() );
+  assert(pM->state_downcast< const IReg * >());
+
+  // to X and back. Not really needed for now
+        std::cout << "\n--- going for X\n";
+        pM->process_event( EvToX() );
+        assert(pM->state_downcast< const X * >());
+        std::cout << "\n--- going for Idle\n";
+        pM->process_event( EvToIdle() );
+        assert(pM->state_downcast< const Idle * >());
+        assert(pM->state_downcast< const IUn * >());
+
+  pM->process_event( EvToIReg() );
+  assert(pM->state_downcast< const IReg * >());
+
+ // now - move to OP
+  std::cout << "\n--- going for OP\n";
+
+  pM->process_event( EvToOP() );
+  assert(pM->state_downcast< const ActPre * >());
+  pM->clear_shallow_history< Idle, 0 >();
+  //pM->clear_shallow_history< IUn, 0 >();
+
+  std::cout << "\n--- un sh\n";
+  pM->process_event( EvToUN_sh() );
+  std::cout << (pM->state_downcast< const Idle * >() ? "in Idle" : "not Idle") << "\n";
+  std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
+  std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
+  std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
+  assert(pM->state_downcast< const IUn * >());
+
+  std::cout << "--- done " << __func__ << "\n";
 }
 
 
@@ -294,7 +349,7 @@ void basic_this_works2(boost::shared_ptr< HistoryTest > pM)
   std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
   std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
   std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
-  assert(pM->state_downcast< const IReg * >());
+  assert(pM->state_downcast< const IUn * >());
 }
 
 
@@ -323,8 +378,9 @@ int main( int, char* [] )
   pM->process_event( EvToIMid() );
   assert(pM->state_downcast< const IMid * >());
 
+  forget1(pM);
   basic_this_works(pM);
-  basic_this_works2(pM);
+  //basic_this_works2(pM);
   basic_h(pM);
 
 }
