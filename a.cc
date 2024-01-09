@@ -66,6 +66,8 @@ struct EvToPost: sc::event< EvToPost > {};
 struct EvToUN_sh: sc::event< EvToUN_sh > {};
 struct EvToUN_dp: sc::event< EvToUN_dp > {};
 struct EvToIdle_sh: sc::event< EvToIdle_sh > {};
+struct EvToIdle_dp: sc::event< EvToIdle_dp > {};
+struct EvToIdle: sc::event< EvToIdle > {};
 
 struct A;
 struct HistoryTest : sc::state_machine< HistoryTest, A >
@@ -188,13 +190,16 @@ struct ActPost : sc::simple_state< ActPost, OP> {
         , sc::transition< EvToIReg, IReg >
         , sc::transition< EvToUN_sh, sc::shallow_history<IUn> >
         , sc::transition< EvToIdle_sh, sc::shallow_history<Idle> >
+        //, sc::transition< EvToIdle_dp, sc::deep_history<Idle> >
+        , sc::transition< EvToIdle, Idle >
         > reactions;
 };
 
 void basic_h(boost::shared_ptr< HistoryTest > pM)
 {
-  std::cout << __func__ << "\n";
+  std::cout << "\n\n=================\n" << __func__ << "\n";
   pM->initiate();
+  std::cout << "--- -----------------\n" << __func__ << "\n";
   pM->process_event( EvToIUn() );
   assert(pM->state_downcast< const IUn * >());
   pM->process_event( EvToIReg() );
@@ -206,13 +211,90 @@ void basic_h(boost::shared_ptr< HistoryTest > pM)
   pM->process_event( EvToOP() );
   assert(pM->state_downcast< const ActPre * >());
 
+  // temp test:
+  if (false) {
+  std::cout << "\n--- un sh\n";
+  pM->process_event( EvToUN_sh() );
+  std::cout << (pM->state_downcast< const Idle * >() ? "in Idle" : "not Idle") << "\n";
+  std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
+  std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
+  std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
+  }
+
   // continue to post
   pM->process_event( EvToPost() );
   assert(pM->state_downcast< const ActPost * >());
 
   // and back with history
-  pM->process_event( EvToIdle_sh() );
-  assert(pM->state_downcast< const Idle * >());
+  std::cout << "\n--- back to some form of Idle\n";
+  pM->process_event( EvToUN_sh() );
+  //pM->process_event( EvToIdle_dp() );
+  std::cout << (pM->state_downcast< const Idle * >() ? "in Idle" : "not Idle") << "\n";
+  std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
+  std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
+  std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
+
+  //pM->process_event( EvToIdle() );
+  std::cout << (pM->state_downcast< const Idle * >() ? "in Idle" : "not Idle") << "\n";
+  std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
+  std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
+  std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
+
+  std::cout << "\n--- done\n";
+}
+
+
+void basic_this_works(boost::shared_ptr< HistoryTest > pM)
+{
+  std::cout << "\n\n=================\n" << __func__ << "\n";
+  pM->initiate();
+  std::cout << "--- -----------------\n" << __func__ << "\n";
+  pM->process_event( EvToIUn() );
+  assert(pM->state_downcast< const IUn * >());
+  pM->process_event( EvToIReg() );
+  assert(pM->state_downcast< const IReg * >());
+
+  // now - move to OP
+  std::cout << "\n--- going for OP\n";
+
+  pM->process_event( EvToOP() );
+  assert(pM->state_downcast< const ActPre * >());
+
+  std::cout << "\n--- un sh\n";
+  pM->process_event( EvToUN_sh() );
+  std::cout << (pM->state_downcast< const Idle * >() ? "in Idle" : "not Idle") << "\n";
+  std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
+  std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
+  std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
+}
+
+
+void basic_this_works2(boost::shared_ptr< HistoryTest > pM)
+{
+  std::cout << "\n\n=================\n" << __func__ << "\n";
+  pM->initiate();
+  std::cout << "--- -----------------\n" << __func__ << "\n";
+  pM->process_event( EvToIUn() );
+  assert(pM->state_downcast< const IUn * >());
+  pM->process_event( EvToIReg() );
+  assert(pM->state_downcast< const IReg * >());
+
+  // now - move to OP
+  std::cout << "\n--- going for OP\n";
+
+  pM->process_event( EvToOP() );
+  assert(pM->state_downcast< const ActPre * >());
+  // continue to post
+  pM->process_event( EvToPost() );
+  assert(pM->state_downcast< const ActPost * >());
+
+  std::cout << "\n--- un sh\n";
+  pM->process_event( EvToUN_sh() );
+  std::cout << (pM->state_downcast< const Idle * >() ? "in Idle" : "not Idle") << "\n";
+  std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
+  std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
+  std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
+  assert(pM->state_downcast< const IReg * >());
 }
 
 
@@ -241,6 +323,8 @@ int main( int, char* [] )
   pM->process_event( EvToIMid() );
   assert(pM->state_downcast< const IMid * >());
 
+  basic_this_works(pM);
+  basic_this_works2(pM);
   basic_h(pM);
 
 }
