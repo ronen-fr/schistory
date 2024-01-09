@@ -17,11 +17,7 @@
 #include <boost/statechart/event.hpp>
 #include <boost/statechart/event_base.hpp>
 #include <boost/statechart/in_state_reaction.hpp>
-#include <boost/statechart/simple_state.hpp>
-#include <boost/statechart/shallow_history.hpp>
 #include <boost/statechart/state.hpp>
-#include <boost/statechart/state_machine.hpp>
-#include <boost/statechart/transition.hpp>
 
 #include <boost/mpl/list.hpp>
 #include <boost/shared_ptr.hpp>
@@ -67,6 +63,9 @@ struct EvToIUn: sc::event< EvToIUn > {};
 struct EvToIMid: sc::event< EvToIMid > {};
 struct EvToIReg: sc::event< EvToIReg > {};
 struct EvToPost: sc::event< EvToPost > {};
+struct EvToUN_sh: sc::event< EvToUN_sh > {};
+struct EvToUN_dp: sc::event< EvToUN_dp > {};
+struct EvToIdle_sh: sc::event< EvToIdle_sh > {};
 
 struct A;
 struct HistoryTest : sc::state_machine< HistoryTest, A >
@@ -89,6 +88,9 @@ struct I;
 struct M;
 struct Q;
 struct X;
+struct ActPre;
+struct ActPost;
+
 struct A : sc::simple_state< A, HistoryTest, X >
 {
   typedef mpl::list<
@@ -121,8 +123,11 @@ struct A : sc::simple_state< A, HistoryTest, X >
 struct X : sc::simple_state< X, A > {BODY(X)};
 struct Y : sc::simple_state< Y, A > {BODY(Y)};
 struct Idle;
-struct RActive : sc::simple_state< RActive, A, Idle > {BODY(RActive);};
-struct Idle : sc::simple_state< Idle, RActive, IUn> {
+struct RActive : sc::simple_state< RActive, A, mpl::list<sc::shallow_history<Idle>>, sc::has_shallow_history> 
+{
+        BODY(RActive);
+};
+struct Idle : sc::simple_state< Idle, RActive, IUn, sc::has_shallow_history> {
   BODY(Idle);
         typedef mpl::list<
         sc::transition< EvToIUn, IUn >,
@@ -139,12 +144,32 @@ struct IUn : sc::simple_state< IUn, Idle > {
                 sc::transition< EvToIReg, IReg >
                 > reactions;
 };
-struct IMid : sc::simple_state< IMid, Idle > {BODY(IMid);};
-struct IReg : sc::simple_state< IReg, Idle > {BODY(IReg);};
+struct IMid : sc::simple_state< IMid, Idle > {
+        BODY(IMid);
+        typedef mpl::list<
+                sc::transition< EvToIUn, IUn >
+                , sc::transition< EvToIReg, IReg >
+                > reactions;};
+struct IReg : sc::simple_state< IReg, Idle > {
+  BODY(IReg);
+        typedef mpl::list<
+                sc::transition< EvToIUn, IUn >
+                , sc::transition< EvToIMid, IMid >
+                , sc::transition< EvToPost, ActPost >
+                > reactions;
+};
 
-struct ActPre;
-struct ActPost;
-struct OP : sc::simple_state< OP, RActive, ActPre > {BODY(OP);};
+struct OP : sc::simple_state< OP, RActive, mpl::list<sc::shallow_history<ActPre>> , sc::has_full_history> {
+        BODY(OP);
+        typedef mpl::list<
+        sc::transition< EvToIUn, IUn >
+        , sc::transition< EvToIMid, IMid >
+        , sc::transition< EvToIReg, IReg >
+        , sc::transition< EvToUN_sh, sc::shallow_history<IUn> >
+        > reactions;
+};
+
+
 struct ActPre : sc::simple_state< ActPre, OP > {
         BODY(ActPre);
         typedef mpl::list<
@@ -152,9 +177,44 @@ struct ActPre : sc::simple_state< ActPre, OP > {
         //     sc::transition< EvToIMid, IMid >,
         //     sc::transition< EvToIReg, IReg >,
             sc::transition< EvToPost, ActPost >
+        , sc::transition< EvToUN_sh, sc::shallow_history<IUn> >
         > reactions;
 };
-struct ActPost : sc::simple_state< ActPost, OP > {BODY(ActPost);};
+struct ActPost : sc::simple_state< ActPost, OP> {
+        BODY(ActPost);
+        typedef mpl::list<
+        sc::transition< EvToIUn, IUn >
+        , sc::transition< EvToIMid, IMid >
+        , sc::transition< EvToIReg, IReg >
+        , sc::transition< EvToUN_sh, sc::shallow_history<IUn> >
+        , sc::transition< EvToIdle_sh, sc::shallow_history<Idle> >
+        > reactions;
+};
+
+void basic_h(boost::shared_ptr< HistoryTest > pM)
+{
+  std::cout << __func__ << "\n";
+  pM->initiate();
+  pM->process_event( EvToIUn() );
+  assert(pM->state_downcast< const IUn * >());
+  pM->process_event( EvToIReg() );
+  assert(pM->state_downcast< const IReg * >());
+
+  // now - move to OP
+  std::cout << "\n--- going for OP\n";
+
+  pM->process_event( EvToOP() );
+  assert(pM->state_downcast< const ActPre * >());
+
+  // continue to post
+  pM->process_event( EvToPost() );
+  assert(pM->state_downcast< const ActPost * >());
+
+  // and back with history
+  pM->process_event( EvToIdle_sh() );
+  assert(pM->state_downcast< const Idle * >());
+}
+
 
 int main( int, char* [] )
 {
@@ -181,6 +241,7 @@ int main( int, char* [] )
   pM->process_event( EvToIMid() );
   assert(pM->state_downcast< const IMid * >());
 
+  basic_h(pM);
 
 }
 
