@@ -70,6 +70,7 @@ struct EvToIdle_dp: sc::event< EvToIdle_dp > {};
 struct EvToIdle: sc::event< EvToIdle > {};
 
 struct EvToX: sc::event< EvToX > {};
+struct EvToY: sc::event< EvToY > {};
 
 
 struct A;
@@ -135,10 +136,58 @@ struct X : sc::simple_state< X, A > {
         , sc::transition< EvToIdle, Idle >
         > reactions;
 };
-struct Y : sc::simple_state< Y, A > {BODY(Y)};
-struct RActive : sc::simple_state< RActive, A, mpl::list<sc::shallow_history<Idle>>, sc::has_shallow_history> 
+
+/// Y is used to test 'sc::result' forwarding
+struct Y : sc::simple_state< Y, A > {
+  sc::result aux(int i) {
+    std::cout << "aux(" << i << ")\n";
+    switch (i) {
+      case 0: return transit< X >();
+      case 1: return transit< IUn >();
+      case 2: return transit< IMid >();
+      case 3: return transit< IReg >();
+      case 4: return transit< Idle >();
+      default: return discard_event();
+    }
+    return discard_event();
+  }
+
+//  This won't compile:
+//   sc::result cpaux(int i) {
+//     std::cout << "cpaux(" << i << ")\n";
+//     sc::result r{discard_event()};
+//     switch (i) {
+//       case 0: r = std::move(transit< X >()); break;
+//       case 1: r =  transit< IUn >(); break;
+//       case 2: r =  transit< IMid >(); break;
+//       case 3: r =  transit< IReg >(); break;
+//       case 4: r =  transit< Idle >(); break;
+//       default: r =  discard_event(); break;
+//     }
+//     return r;
+//   }
+
+
+BODY(Y)
+
+        typedef mpl::list<
+        sc::custom_reaction< EvToIUn >
+        , sc::custom_reaction< EvToIMid >
+        , sc::custom_reaction< EvToIReg >
+        , sc::custom_reaction< EvToIdle >
+        > reactions;
+
+        sc::result react( const EvToIUn & ) { return aux(1); }
+        sc::result react( const EvToIMid & ) { return aux(2); }
+        sc::result react( const EvToIReg & ) { return aux(3); }
+        sc::result react( const EvToIdle & ) { return aux(4); }
+};
+
+
+// the 'has shallow' here is required
+struct RActive : sc::simple_state< RActive, A, mpl::list<sc::shallow_history<Idle>>, sc::has_shallow_history>
 {
-        BODY(RActive);
+  BODY(RActive);
 };
 struct Idle : sc::simple_state< Idle, RActive, IUn, sc::has_shallow_history> {
   BODY(Idle);
@@ -155,7 +204,8 @@ struct IUn : sc::simple_state< IUn, Idle > {
   BODY(IUn);
         typedef mpl::list<
                 sc::transition< EvToIMid, IMid >,
-                sc::transition< EvToIReg, IReg >
+                sc::transition< EvToIReg, IReg >,
+                sc::transition< EvToY, Y >
                 > reactions;
 };
 struct IMid : sc::simple_state< IMid, Idle > {
@@ -173,7 +223,8 @@ struct IReg : sc::simple_state< IReg, Idle > {
                 > reactions;
 };
 
-struct OP : sc::simple_state< OP, RActive, mpl::list<sc::shallow_history<ActPre>> , sc::has_full_history> {
+//works, too: struct OP : sc::simple_state< OP, RActive, mpl::list<sc::shallow_history<ActPre>> , sc::has_full_history> {
+struct OP : sc::simple_state< OP, RActive, ActPre > {
         BODY(OP);
         typedef mpl::list<
         sc::transition< EvToIUn, IUn >
@@ -282,7 +333,7 @@ void basic_this_works(boost::shared_ptr< HistoryTest > pM)
 }
 
 
-void forget1(boost::shared_ptr< HistoryTest > pM)
+void forget1(boost::shared_ptr< HistoryTest > pM, bool do_forget)
 {
   std::cout << "\n\n=================  " << __func__ << "\n";
   pM->initiate();
@@ -309,7 +360,8 @@ void forget1(boost::shared_ptr< HistoryTest > pM)
 
   pM->process_event( EvToOP() );
   assert(pM->state_downcast< const ActPre * >());
-  pM->clear_shallow_history< Idle, 0 >();
+  if (do_forget)
+    pM->clear_shallow_history< Idle, 0 >();
   //pM->clear_shallow_history< IUn, 0 >();
 
   std::cout << "\n--- un sh\n";
@@ -318,7 +370,11 @@ void forget1(boost::shared_ptr< HistoryTest > pM)
   std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
   std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
   std::cout << (pM->state_downcast< const ActPost * >() ? "in ActPost" : "not ActPost") << "\n";
-  assert(pM->state_downcast< const IUn * >());
+  if (do_forget) {
+    assert(pM->state_downcast< const IUn * >());
+  } else {
+    assert(pM->state_downcast< const IReg * >());
+  }
 
   std::cout << "--- done " << __func__ << "\n";
 }
@@ -344,7 +400,13 @@ void basic_this_works2(boost::shared_ptr< HistoryTest > pM)
   assert(pM->state_downcast< const ActPost * >());
 
   std::cout << "\n--- un sh\n";
+  #if 0
+  // this one (EvToUN_sh) - works
   pM->process_event( EvToUN_sh() );
+  #else
+  // this one too. Same effect.
+  pM->process_event( EvToIdle_sh() );
+  #endif
   std::cout << (pM->state_downcast< const Idle * >() ? "in Idle" : "not Idle") << "\n";
   std::cout << (pM->state_downcast< const IUn * >() ? "in IUn" : "not IUn") << "\n";
   std::cout << (pM->state_downcast< const IReg * >() ? "in IReg" : "not IReg") << "\n";
@@ -352,6 +414,18 @@ void basic_this_works2(boost::shared_ptr< HistoryTest > pM)
   assert(pM->state_downcast< const IUn * >());
 }
 
+void test_forwarding(boost::shared_ptr< HistoryTest > pM)
+{
+  std::cout << "\n\n=================\n" << __func__ << "\n";
+  pM->initiate();
+  std::cout << "--- -----------------\n" << __func__ << "\n";
+  pM->process_event( EvToIUn() );
+  assert(pM->state_downcast< const IUn * >());
+  pM->process_event( EvToY() );
+  assert(pM->state_downcast< const Y * >());
+  pM->process_event( EvToIReg() );
+  assert(pM->state_downcast< const IReg * >());
+}
 
 int main( int, char* [] )
 {
@@ -378,7 +452,9 @@ int main( int, char* [] )
   pM->process_event( EvToIMid() );
   assert(pM->state_downcast< const IMid * >());
 
-  forget1(pM);
+  forget1(pM, true);
+  forget1(pM, false);
+  test_forwarding(pM);
   basic_this_works(pM);
   //basic_this_works2(pM);
   basic_h(pM);
