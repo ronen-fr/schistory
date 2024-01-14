@@ -72,6 +72,9 @@ struct EvToIdle: sc::event< EvToIdle > {};
 struct EvToX: sc::event< EvToX > {};
 struct EvToY: sc::event< EvToY > {};
 
+struct EvInterval: sc::event< EvInterval > {};
+struct EvToActiMidPlus: sc::event< EvToActiMidPlus > {};
+
 
 struct A;
 struct HistoryTest : sc::state_machine< HistoryTest, A >
@@ -95,6 +98,7 @@ struct M;
 struct Q;
 struct X;
 struct ActPre;
+struct ActMid;
 struct ActPost;
 struct Idle;
 
@@ -131,6 +135,7 @@ struct X : sc::simple_state< X, A > {
         BODY(X)
         typedef mpl::list<
         sc::transition< EvToIUn, IUn >
+        , sc::transition< EvToOP, OP >
         , sc::transition< EvToIMid, IMid >
         , sc::transition< EvToIReg, IReg >
         , sc::transition< EvToIdle, Idle >
@@ -188,7 +193,12 @@ BODY(Y)
 struct RActive : sc::simple_state< RActive, A, mpl::list<sc::shallow_history<Idle>>, sc::has_shallow_history>
 {
   BODY(RActive);
+        typedef mpl::list<
+        sc::transition< EvInterval, A >
+        > reactions;
 };
+
+
 struct Idle : sc::simple_state< Idle, RActive, IUn, sc::has_shallow_history> {
   BODY(Idle);
         typedef mpl::list<
@@ -231,6 +241,7 @@ struct OP : sc::simple_state< OP, RActive, ActPre > {
         , sc::transition< EvToIMid, IMid >
         , sc::transition< EvToIReg, IReg >
         , sc::transition< EvToUN_sh, sc::shallow_history<IUn> >
+        , sc::transition< EvToX, X >
         > reactions;
 };
 
@@ -242,9 +253,28 @@ struct ActPre : sc::simple_state< ActPre, OP > {
         //     sc::transition< EvToIMid, IMid >,
         //     sc::transition< EvToIReg, IReg >,
             sc::transition< EvToPost, ActPost >
+        , sc::custom_reaction< EvToActiMidPlus >
+        , sc::transition< EvToUN_sh, sc::shallow_history<IUn> >
+        > reactions;
+
+        sc::result react( const EvToActiMidPlus & ) {
+                std::cout << "ActPre::react(EvToActiMidPlus)\n";
+                post_event(EvToPost());
+                return transit< ActMid >();
+        }
+};
+
+struct ActMid : sc::simple_state< ActMid, OP > {
+        BODY(ActMid);
+        typedef mpl::list<
+        //     sc::transition< EvToIUn, IUn >,
+        //     sc::transition< EvToIMid, IMid >,
+        //     sc::transition< EvToIReg, IReg >,
+            sc::transition< EvToPost, ActPost >
         , sc::transition< EvToUN_sh, sc::shallow_history<IUn> >
         > reactions;
 };
+
 struct ActPost : sc::simple_state< ActPost, OP> {
         BODY(ActPost);
         typedef mpl::list<
@@ -379,6 +409,49 @@ void forget1(boost::shared_ptr< HistoryTest > pM, bool do_forget)
   std::cout << "--- done " << __func__ << "\n";
 }
 
+/*
+  We really only need the history if going deeper from Idle, i.e.:
+  - if we were in IReg or IUn, then left IDLE and came back, we should be in IReg or IUn.
+  But if we leave IDLE parent (RACTIVE) and come back, teh history must be erased!
+  This was not the case on 12.1.24 code.
+*/
+void correct_level(boost::shared_ptr<HistoryTest> pM) {
+  std::cout << "\n\n=================  " << __func__ << "\n";
+  pM->initiate();
+  std::cout << "--- -----------------  " << __func__ << "\n";
+
+  // First: ->OP/ActPre -> X -> Idle/Un
+  pM->process_event(EvToOP());
+  assert(pM->state_downcast<const ActPre*>());
+  pM->process_event(EvToX());
+  assert(pM->state_downcast<const X*>());
+  pM->process_event(EvToIdle());
+  assert(pM->state_downcast<const Idle*>());
+  assert(pM->state_downcast<const IUn*>());
+
+
+  // 2'nd: ->Idle/Ireg  ->OP/ActPre -> X -> Idle/Un
+  std::cout << "\n\n2'nd: ->Idle/Ireg  ->OP/ActPre -> X -> Idle/Un\n";
+  pM->process_event(EvInterval());
+  assert(pM->state_downcast<const X*>());
+  pM->process_event(EvToIdle());
+  assert(pM->state_downcast<const Idle*>());
+  assert(pM->state_downcast<const IUn*>());
+  pM->process_event( EvToIReg() );
+  assert(pM->state_downcast< const IReg * >());
+
+
+  pM->process_event(EvToOP());
+  assert(pM->state_downcast<const ActPre*>());
+  pM->process_event(EvToActiMidPlus());
+  assert(pM->state_downcast<const ActPost*>());
+
+  pM->process_event(EvInterval());
+  assert(pM->state_downcast<const X*>());
+  pM->process_event(EvToIdle());
+  assert(pM->state_downcast<const Idle*>());
+  assert(pM->state_downcast<const IUn*>());
+}
 
 void basic_this_works2(boost::shared_ptr< HistoryTest > pM)
 {
@@ -452,12 +525,15 @@ int main( int, char* [] )
   pM->process_event( EvToIMid() );
   assert(pM->state_downcast< const IMid * >());
 
+  // 13.1.2024:
+  correct_level(pM);
+
   forget1(pM, true);
   forget1(pM, false);
-  test_forwarding(pM);
-  basic_this_works(pM);
-  //basic_this_works2(pM);
-  basic_h(pM);
+//   test_forwarding(pM);
+//   basic_this_works(pM);
+//   //basic_this_works2(pM);
+//   basic_h(pM);
 
 }
 
